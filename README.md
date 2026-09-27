@@ -187,6 +187,55 @@ Note that inference speed may drop if you are running other GPU intensive tasks 
 Generally, latency is around 1~2s to prevent quality drop (the sad nature of diffusion models...😥), but we are keeping on looking for ways to reduce it.  
 
 *(GUI and audio chunking logic are modified from [RVC](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI), thanks for their brilliant implementation!)*
+
+## Unity integration 🎮
+
+`voice_worker.py` exposes Seed-VC as a persistent external process suitable for Unity and other game engines. The game launches the worker once,
+keeps it alive while the game is running, and exchanges newline-delimited JSON messages through redirected standard input and output. Human-readable
+model diagnostics are written to standard error so they cannot corrupt protocol responses.
+
+Build the self-contained Windows worker directory from the repository root:
+
+```powershell
+pwsh tools/stage_voice_worker.ps1 -Destination ../VoiceWorker
+```
+
+Staging expects the inference environment and the model artifacts identified by `model-lock.json` to exist locally. It verifies every model's byte
+count and SHA-256 hash, runs a real conversion, and produces `VoiceWorker/` with its own Python runtime, dependencies, source, models, licenses, and
+package manifest. The generated directory is a deployment artifact and is intentionally not tracked by Git.
+
+The default development layout clones this repository as `UnityProject/seed-vc` and places `VoiceWorker/` at the Unity project root. For a Windows
+build, pass a destination beside the game executable:
+
+```powershell
+pwsh tools/stage_voice_worker.ps1 -Destination ../Builds/Windows/VoiceWorker
+```
+
+The resulting package has this top-level layout:
+
+```text
+VoiceWorker/
+|-- python/python.exe
+|-- seed-vc/voice_worker.py
+|-- models/
+|-- licenses/
+`-- worker-manifest.json
+```
+
+Launch `python/python.exe -u seed-vc/voice_worker.py` with `VoiceWorker/seed-vc` as the working directory. Keep standard input, standard output, and
+standard error redirected. The worker loads its models before emitting `ready` and reuses them for subsequent requests. If CUDA initialization or
+inference fails, it releases the GPU model state and retries once on CPU.
+
+Each protocol request must be one JSON object on one line and must contain a unique string `id`. For example:
+
+```json
+{"id":"line-1","command":"convert","source":"C:/audio/script.wav","reference":"C:/audio/voice.wav","output":"C:/audio/result.wav","diffusionSteps":25}
+```
+
+The worker supports `convert`, `ping`, and `shutdown` commands. It emits `ready`, `started`, `completed`, `pong`, `error`, `fatal`, and
+`shuttingDown` events. Conversion output must use the WAV extension. Unity should treat the worker as a separate process and keep game-specific
+logic on the Unity side of this protocol boundary.
+
 ## TODO📝
 - [x] Release code
 - [x] Release v0.1 pretrained model: [![Hugging Face](https://img.shields.io/badge/🤗%20Hugging%20Face-SeedVC-blue)](https://huggingface.co/Plachta/Seed-VC)
@@ -209,6 +258,10 @@ Generally, latency is around 1~2s to prevent quality drop (the sad nature of dif
 - [ ] More to be added
 
 ## CHANGELOGS🗒️
+- 2026-09-27:
+    - Added a persistent JSON-lines voice worker for Unity and other external clients
+    - Added self-contained Windows worker staging with pinned model hashes, license metadata, and a verified package manifest
+    - Added automatic CUDA-to-CPU recovery, lean CPU/GPU dependency manifests, and worker protocol tests
 - 2024-10-28:
     - Updated fine-tuned 44k singing voice conversion model with better audio quality
 - 2024-10-27:
