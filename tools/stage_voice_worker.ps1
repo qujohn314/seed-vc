@@ -71,14 +71,14 @@ function Copy-DirectoryContents {
 function Invoke-WorkerSmokeTest {
     param(
         [Parameter(Mandatory = $true)][string]$PackageRoot,
-        [Parameter(Mandatory = $true)][string]$RepositoryRoot
+        [Parameter(Mandatory = $true)][string]$SourceRoot
     )
 
     $pythonExecutable = Join-Path $PackageRoot "python\python.exe"
     $workerDirectory = Join-Path $PackageRoot "seed-vc"
     $workerScript = Join-Path $workerDirectory "voice_worker.py"
-    $sourceAudio = Join-Path $RepositoryRoot "Assets\Sound\Mimicry\script\script1.mp3"
-    $referenceAudio = Join-Path $RepositoryRoot "Assets\Sound\Mimicry\input\female.mp3"
+    $sourceAudio = Join-Path $SourceRoot "examples\source\source_s3.wav"
+    $referenceAudio = Join-Path $SourceRoot "examples\reference\s3p2.wav"
     $smokeOutput = Join-Path $PackageRoot "smoke-test-output.wav"
 
     foreach ($requiredPath in @($pythonExecutable, $workerScript, $sourceAudio, $referenceAudio)) {
@@ -327,7 +327,7 @@ try {
 
     if (!$SkipSmokeTest) {
         Write-Host "Running staged worker smoke conversion..."
-        Invoke-WorkerSmokeTest -PackageRoot $stagingRoot -RepositoryRoot $repositoryRoot
+        Invoke-WorkerSmokeTest -PackageRoot $stagingRoot -SourceRoot $seedVcRoot
     }
 
     Write-Host "Generating SHA-256 package manifest..."
