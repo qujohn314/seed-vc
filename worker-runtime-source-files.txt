@@ -1,0 +1,26 @@
+# Seed-VC source modules observed during a complete non-F0 speech conversion.
+inference.py
+voice_worker.py
+hf_utils.py
+dac/__init__.py
+dac/nn/__init__.py
+dac/nn/layers.py
+dac/nn/quantize.py
+modules/audio.py
+modules/bigvgan/activations.py
+modules/bigvgan/bigvgan.py
+modules/bigvgan/env.py
+modules/bigvgan/utils.py
+modules/bigvgan/alias_free_activation/torch/__init__.py
+modules/bigvgan/alias_free_activation/torch/act.py
+modules/bigvgan/alias_free_activation/torch/filter.py
+modules/bigvgan/alias_free_activation/torch/resample.py
+modules/campplus/DTDNN.py
+modules/campplus/layers.py
+modules/commons.py
+modules/diffusion_transformer.py
+modules/encodec.py
+modules/flow_matching.py
+modules/gpt_fast/model.py
+modules/length_regulator.py
+modules/wavenet.py

@@ -1,0 +1,9 @@
+# Validated against CPU and CUDA PyTorch 2.5.1 workers on Windows.
+# Apply these exclusions only to a staged runtime copy, never to the source environment.
+Lib/site-packages/torch/lib/*.lib
+Lib/site-packages/torch/include/**
+Lib/site-packages/torch/bin/protoc.exe
+
+# Standard generated files that are not needed by the packaged worker.
+**/__pycache__/**
+**/*.pyc

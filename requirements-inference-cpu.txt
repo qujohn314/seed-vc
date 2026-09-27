@@ -1,0 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements-inference-common.txt
+
+torch==2.5.1+cpu
+torchaudio==2.5.1+cpu

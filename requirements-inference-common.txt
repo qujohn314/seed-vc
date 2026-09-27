@@ -1,0 +1,11 @@
+# Minimal dependencies for non-F0 speech conversion through inference.py.
+# Web UI, evaluation, microphone, singing, plotting, and training packages are excluded.
+numpy==1.26.4
+huggingface-hub==0.26.5
+munch==4.0.0
+einops==0.8.2
+transformers==4.46.3
+soundfile==0.14.0
+soxr==1.1.0
+PyYAML==6.0.3
+tqdm==4.66.5

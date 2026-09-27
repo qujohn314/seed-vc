@@ -3,17 +3,27 @@
 
 import glob
 import os
-import matplotlib
+import soundfile as sf
 import torch
 from torch.nn.utils import weight_norm
 
-matplotlib.use("Agg")
-import matplotlib.pylab as plt
-from .meldataset import MAX_WAV_VALUE
-from scipy.io.wavfile import write
+MAX_WAV_VALUE = 32767.0
+
+
+def _get_plotting_module():
+    # Plotting is useful during model development but is not part of inference.
+    # Import it only when a plotting helper is called so production workers do
+    # not need to carry Matplotlib and its rendering dependencies.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pylab as plt
+
+    return plt
 
 
 def plot_spectrogram(spectrogram):
+    plt = _get_plotting_module()
     fig, ax = plt.subplots(figsize=(10, 2))
     im = ax.imshow(spectrogram, aspect="auto", origin="lower", interpolation="none")
     plt.colorbar(im, ax=ax)
@@ -25,6 +35,7 @@ def plot_spectrogram(spectrogram):
 
 
 def plot_spectrogram_clipped(spectrogram, clip_max=2.0):
+    plt = _get_plotting_module()
     fig, ax = plt.subplots(figsize=(10, 2))
     im = ax.imshow(
         spectrogram,
@@ -96,4 +107,4 @@ def save_audio(audio, path, sr):
     # wav: torch with 1d shape
     audio = audio * MAX_WAV_VALUE
     audio = audio.cpu().numpy().astype("int16")
-    write(path, sr, audio)
+    sf.write(path, audio, sr, subtype="PCM_16")

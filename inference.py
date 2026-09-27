@@ -1,6 +1,8 @@
 import shutil
 import warnings
 import argparse
+import gc
+import sys
 import torch
 import os
 import os.path as osp
@@ -15,16 +17,98 @@ from modules.commons import *
 import time
 
 import torchaudio
-import librosa
+import soundfile as sf
+import soxr
 import torchaudio.compliance.kaldi as kaldi
 
 from hf_utils import load_custom_model_from_hf
 
 
-# Load model and configuration
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Load model and configuration. The environment override lets the packaged worker
+# force CPU inference even when a CUDA device is present, which is useful for
+# compatibility checks and an eventual user-selectable fallback.
+requested_device = os.environ.get("SEED_VC_DEVICE")
+
+
+def select_initial_device(device_override=None):
+    if device_override:
+        return torch.device(device_override)
+
+    # A missing, corrupt, or incompatible NVIDIA driver can make the CUDA probe
+    # itself fail. Treat that exactly like an unavailable GPU so the worker can
+    # still start on CPU rather than terminating before model initialization.
+    try:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    except Exception as error:
+        print(
+            f"CUDA availability check failed ({type(error).__name__}: {error}); using CPU.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return torch.device("cpu")
+
+
+device = select_initial_device(requested_device)
+
+
+def is_recoverable_cuda_error(error):
+    if device.type != "cuda":
+        return False
+
+    if isinstance(error, torch.cuda.OutOfMemoryError):
+        return True
+
+    # PyTorch reports most driver, kernel, and CUDA-library failures as a plain
+    # RuntimeError. Restrict fallback to messages that identify the accelerator;
+    # unrelated problems such as invalid input or missing files should remain
+    # visible immediately rather than causing an expensive duplicate attempt.
+    message = str(error).lower()
+    cuda_error_markers = (
+        "cuda",
+        "cudnn",
+        "cublas",
+        "cufft",
+        "cusolver",
+        "cusparse",
+        "nvrtc",
+        "nvidia",
+        "gpu",
+        "device-side",
+        "no kernel image",
+        "out of memory",
+    )
+    return isinstance(error, (RuntimeError, OSError)) and any(marker in message for marker in cuda_error_markers)
+
+
+def release_cuda_memory():
+    # The failed inference frame has already unwound when this runs, so deleting
+    # its local model references through garbage collection allows PyTorch to
+    # release allocations before the CPU copies are created.
+    gc.collect()
+    try:
+        if torch.cuda.is_initialized():
+            torch.cuda.empty_cache()
+    except Exception as error:
+        # Cleanup can also touch a broken driver. It is best-effort only: CPU
+        # inference does not require the CUDA allocator to recover successfully.
+        print(
+            f"CUDA cleanup failed ({type(error).__name__}: {error}); continuing on CPU.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def load_audio(path, sampling_rate):
+    # This reproduces librosa.load's mono mix and default high-quality SoXR
+    # resampling without importing Librosa's much larger analysis dependency tree.
+    audio, source_sampling_rate = sf.read(path, dtype="float32", always_2d=True)
+    audio = audio.mean(axis=1)
+    if source_sampling_rate != sampling_rate:
+        audio = soxr.resample(audio, source_sampling_rate, sampling_rate, quality="HQ")
+    return torch.from_numpy(audio).float()
 
 def load_models(args):
+    f0_extractor = None
     if not args.f0_condition:
         dit_checkpoint_path, dit_config_path = load_custom_model_from_hf("Plachta/Seed-VC",
                                                                          "DiT_seed_v2_uvit_whisper_small_wavenet_bigvgan_pruned.pth",
@@ -64,7 +148,9 @@ def load_models(args):
 
     from modules.bigvgan import bigvgan
     bigvgan_name = 'nvidia/bigvgan_v2_22khz_80band_256x' if sr == 22050 else 'nvidia/bigvgan_v2_44khz_128band_512x'
-    bigvgan_model = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=False)
+    packaged_model_root = os.environ.get("SEED_VC_MODEL_DIR")
+    bigvgan_source = osp.join(packaged_model_root, "bigvgan") if packaged_model_root else bigvgan_name
+    bigvgan_model = bigvgan.BigVGAN.from_pretrained(bigvgan_source, use_cuda_kernel=False)
 
     # remove weight norm in the model and set to eval mode
     bigvgan_model.remove_weight_norm()
@@ -85,12 +171,32 @@ def load_models(args):
         _ = [codec_encoder[key].to(device) for key in codec_encoder]
         speechtokenizer_set = ('facodec', codec_encoder, None)
     elif model_params.speech_tokenizer.type == "whisper":
-        from transformers import AutoFeatureExtractor, WhisperModel
-        whisper_name = model_params.speech_tokenizer.whisper_name if hasattr(model_params.speech_tokenizer, 'whisper_name') else "whisper-large-v3"
-        whisper_model = WhisperModel.from_pretrained(whisper_name, torch_dtype=torch.float16).to(device)
-        del whisper_model.decoder
-        whisper_feature_extractor = AutoFeatureExtractor.from_pretrained(whisper_name)
-        speechtokenizer_set = ('whisper', whisper_model, whisper_feature_extractor)
+        from transformers import AutoFeatureExtractor, WhisperConfig, WhisperModel
+        if hasattr(model_params.speech_tokenizer, 'whisper_name'):
+            whisper_name = model_params.speech_tokenizer.whisper_name
+        elif hasattr(model_params.speech_tokenizer, 'name'):
+            whisper_name = model_params.speech_tokenizer.name
+        else:
+            whisper_name = "openai/whisper-small"
+        whisper_dtype = torch.float16 if device.type == "cuda" else torch.float32
+        encoder_directory = os.environ.get("SEED_VC_WHISPER_ENCODER_DIR")
+        if encoder_directory:
+            from safetensors.torch import load_file
+            from transformers.models.whisper.modeling_whisper import WhisperEncoder
+
+            encoder_config = WhisperConfig.from_pretrained(encoder_directory)
+            whisper_encoder = WhisperEncoder(encoder_config)
+            encoder_state = load_file(osp.join(encoder_directory, "encoder.safetensors"), device="cpu")
+            whisper_encoder.load_state_dict(encoder_state, strict=True)
+            whisper_encoder = whisper_encoder.to(device=device, dtype=whisper_dtype).eval()
+            whisper_feature_extractor = AutoFeatureExtractor.from_pretrained(encoder_directory)
+        else:
+            # Keep the upstream loader as a development fallback. Packaged workers
+            # use the encoder-only checkpoint and avoid shipping the unused decoder.
+            whisper_model = WhisperModel.from_pretrained(whisper_name, torch_dtype=whisper_dtype).to(device)
+            whisper_encoder = whisper_model.encoder
+            whisper_feature_extractor = AutoFeatureExtractor.from_pretrained(whisper_name)
+        speechtokenizer_set = ('whisper', whisper_encoder, whisper_feature_extractor)
     else:
         raise ValueError(f"Unsupported speech tokenizer type: {model_params.speech_tokenizer.type}")
 
@@ -117,8 +223,11 @@ def adjust_f0_semitones(f0_sequence, n_semitones):
     return f0_sequence * factor
 
 @torch.no_grad()
-def main(args):
-    model, speechtokenizer_set, f0_extractor, bigvgan_model, campplus_model, to_mel, mel_fn_args = load_models(args)
+def run_inference(args, loaded_models=None):
+    if loaded_models is None:
+        loaded_models = load_models(args)
+
+    model, speechtokenizer_set, f0_extractor, bigvgan_model, campplus_model, to_mel, mel_fn_args = loaded_models
     sr = mel_fn_args['sampling_rate']
     f0_condition = args.f0_condition
     auto_f0_adjust = args.auto_f0_adjust
@@ -129,14 +238,14 @@ def main(args):
     diffusion_steps = args.diffusion_steps
     length_adjust = args.length_adjust
     inference_cfg_rate = args.inference_cfg_rate
-    source_audio = librosa.load(source, sr=sr)[0]
-    ref_audio = librosa.load(target_name, sr=sr)[0]
+    source_audio = load_audio(source, sr)
+    ref_audio = load_audio(target_name, sr)
 
     source_audio = source_audio[:sr * 30]
-    source_audio = torch.tensor(source_audio).unsqueeze(0).float().to(device)
+    source_audio = source_audio.unsqueeze(0).to(device)
 
     ref_audio = ref_audio[:(sr * 30 - source_audio.size(-1))]
-    ref_audio = torch.tensor(ref_audio).unsqueeze(0).float().to(device)
+    ref_audio = ref_audio.unsqueeze(0).to(device)
 
     source_waves_16k = torchaudio.functional.resample(source_audio, sr, 16000)
     ref_waves_16k = torchaudio.functional.resample(ref_audio, sr, 16000)
@@ -157,17 +266,16 @@ def main(args):
         (quantized, codes) = codec_encoder.quantizer(z, waves_input)
         S_ori = torch.cat([codes[1], codes[0]], dim=1)
     elif speechtokenizer_set[0] == 'whisper':
-        whisper_model = speechtokenizer_set[1]
+        whisper_encoder = speechtokenizer_set[1]
         whisper_feature_extractor = speechtokenizer_set[2]
         converted_waves_16k = torchaudio.functional.resample(source_audio, sr, 16000)
         alt_inputs = whisper_feature_extractor([converted_waves_16k.squeeze(0).cpu().numpy()],
                                                return_tensors="pt",
                                                return_attention_mask=True,)
-        alt_input_features = whisper_model._mask_input_features(
-            alt_inputs.input_features, attention_mask=alt_inputs.attention_mask).to(device)
+        alt_input_features = alt_inputs.input_features.to(device)
         with torch.no_grad():
-            alt_outputs = whisper_model.encoder(
-                alt_input_features.to(whisper_model.encoder.dtype),
+            alt_outputs = whisper_encoder(
+                alt_input_features.to(whisper_encoder.dtype),
                 head_mask=None,
                 output_attentions=False,
                 output_hidden_states=False,
@@ -180,11 +288,10 @@ def main(args):
         ori_inputs = whisper_feature_extractor([ori_waves_16k.squeeze(0).cpu().numpy()],
                                                return_tensors="pt",
                                                return_attention_mask=True,)
-        ori_input_features = whisper_model._mask_input_features(
-            ori_inputs.input_features, attention_mask=ori_inputs.attention_mask).to(device)
+        ori_input_features = ori_inputs.input_features.to(device)
         with torch.no_grad():
-            ori_outputs = whisper_model.encoder(
-                ori_input_features.to(whisper_model.encoder.dtype),
+            ori_outputs = whisper_encoder(
+                ori_input_features.to(whisper_encoder.dtype),
                 head_mask=None,
                 output_attentions=False,
                 output_hidden_states=False,
@@ -255,10 +362,97 @@ def main(args):
     time_vc_end = time.time()
     print(f"RTF: {(time_vc_end - time_vc_start) / vc_wave.size(-1) * sr}")
 
-    source_name = source.split("/")[-1].split(".")[0]
-    target_name = target_name.split("/")[-1].split(".")[0]
-    os.makedirs(args.output, exist_ok=True)
-    torchaudio.save(os.path.join(args.output, f"vc_{source_name}_{target_name}_{length_adjust}_{diffusion_steps}_{inference_cfg_rate}.wav"), vc_wave.cpu(), sr)
+    output_file = getattr(args, "output_file", None)
+    if not output_file:
+        source_name = osp.splitext(osp.basename(source))[0]
+        reference_name = osp.splitext(osp.basename(target_name))[0]
+        output_file = osp.join(
+            args.output,
+            f"vc_{source_name}_{reference_name}_{length_adjust}_{diffusion_steps}_{inference_cfg_rate}.wav",
+        )
+
+    output_file = osp.abspath(output_file)
+    os.makedirs(osp.dirname(output_file), exist_ok=True)
+    torchaudio.save(output_file, vc_wave.cpu(), sr)
+    return output_file
+
+
+class SeedVCInferenceRuntime:
+    """Owns one loaded model set and permanently falls back to CPU after a CUDA failure."""
+
+    def __init__(self, f0_condition=False):
+        self.f0_condition = bool(f0_condition)
+        self.models = None
+
+    @property
+    def device_name(self):
+        return str(device)
+
+    def load(self):
+        if self.models is not None:
+            return
+
+        load_args = argparse.Namespace(f0_condition=self.f0_condition)
+        cuda_error_summary = None
+        try:
+            self.models = load_models(load_args)
+            return
+        except Exception as error:
+            if not is_recoverable_cuda_error(error):
+                raise
+            cuda_error_summary = f"{type(error).__name__}: {error}"
+
+        self._switch_to_cpu(cuda_error_summary, "model loading")
+        try:
+            self.models = load_models(load_args)
+        except Exception as cpu_error:
+            raise RuntimeError(
+                f"GPU model loading failed ({cuda_error_summary}), and the one-time CPU fallback also failed."
+            ) from cpu_error
+
+    def convert(self, args):
+        if bool(args.f0_condition) != self.f0_condition:
+            raise ValueError("A persistent Seed-VC runtime cannot change F0 model variants after loading.")
+
+        self.load()
+        cuda_error_summary = None
+        try:
+            return run_inference(args, self.models)
+        except Exception as error:
+            if not is_recoverable_cuda_error(error):
+                raise
+            cuda_error_summary = f"{type(error).__name__}: {error}"
+
+        # A conversion-time CUDA failure may leave any model in an unusable
+        # state. Drop the whole set and build fresh CPU models before retrying
+        # the request; later requests then reuse those CPU models.
+        self._switch_to_cpu(cuda_error_summary, "inference")
+        load_args = argparse.Namespace(f0_condition=self.f0_condition)
+        try:
+            self.models = load_models(load_args)
+            return run_inference(args, self.models)
+        except Exception as cpu_error:
+            raise RuntimeError(
+                f"GPU inference failed ({cuda_error_summary}), and the one-time CPU fallback also failed."
+            ) from cpu_error
+
+    def _switch_to_cpu(self, cuda_error_summary, operation):
+        global device
+
+        print(
+            f"GPU {operation} failed ({cuda_error_summary}). Releasing CUDA state and retrying once on CPU.",
+            file=sys.stderr,
+            flush=True,
+        )
+        self.models = None
+        device = torch.device("cpu")
+        release_cuda_memory()
+
+
+def main(args):
+    runtime = SeedVCInferenceRuntime(args.f0_condition)
+    runtime.load()
+    return runtime.convert(args)
 
 
 if __name__ == "__main__":

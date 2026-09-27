@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "name": "Seed-VC",
+      "repository": "Plachta/Seed-VC",
+      "revision": "257283f9f41585055e8f858fba4fd044e5caed6e",
+      "huggingFaceLicense": "gpl-3.0",
+      "sourceUrl": "https://huggingface.co/Plachta/Seed-VC/tree/257283f9f41585055e8f858fba4fd044e5caed6e",
+      "files": [
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "models--Plachta--Seed-VC/snapshots/257283f9f41585055e8f858fba4fd044e5caed6e/config_dit_mel_seed_uvit_whisper_small_wavenet.yml",
+          "packagePath": "models/seed-vc/config_dit_mel_seed_uvit_whisper_small_wavenet.yml",
+          "bytes": 2289,
+          "sha256": "27a91ac41bdb41d0b6951c63642d791b4a70d60b9fc5550eb645f9ddcb3c94da"
+        },
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "models--Plachta--Seed-VC/snapshots/257283f9f41585055e8f858fba4fd044e5caed6e/DiT_seed_v2_uvit_whisper_small_wavenet_bigvgan_pruned.pth",
+          "packagePath": "models/seed-vc/DiT_seed_v2_uvit_whisper_small_wavenet_bigvgan_pruned.pth",
+          "bytes": 440312082,
+          "sha256": "8ec8841b20bb46df9f7e8e570a6946a4b87b940133c7f0e778487ff33841f720"
+        }
+      ]
+    },
+    {
+      "name": "CAMPPlus",
+      "repository": "funasr/campplus",
+      "revision": "e4b6ede7ce16997aff4ae69fbca1f0175e2afede",
+      "huggingFaceLicense": "apache-2.0",
+      "sourceUrl": "https://huggingface.co/funasr/campplus/tree/e4b6ede7ce16997aff4ae69fbca1f0175e2afede",
+      "files": [
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "models--funasr--campplus/snapshots/e4b6ede7ce16997aff4ae69fbca1f0175e2afede/campplus_cn_common.bin",
+          "packagePath": "models/campplus/campplus_cn_common.bin",
+          "bytes": 28036335,
+          "sha256": "3388cf5fd3493c9ac9c69851d8e7a8badcfb4f3dc631020c4961371646d5ada8"
+        }
+      ]
+    },
+    {
+      "name": "BigVGAN",
+      "repository": "nvidia/bigvgan_v2_22khz_80band_256x",
+      "revision": "633ff708ed5b74903e86ff1298cf4a98e921c513",
+      "huggingFaceLicense": "mit",
+      "sourceUrl": "https://huggingface.co/nvidia/bigvgan_v2_22khz_80band_256x/tree/633ff708ed5b74903e86ff1298cf4a98e921c513",
+      "files": [
+        {
+          "sourceRoot": "huggingface-cache",
+          "sourcePath": "models--nvidia--bigvgan_v2_22khz_80band_256x/snapshots/633ff708ed5b74903e86ff1298cf4a98e921c513/config.json",
+          "packagePath": "models/bigvgan/config.json",
+          "bytes": 1405,
+          "sha256": "88a1f47acf747db0b21e97a389d838566147f7a5464583ff5c8d819d870f03ee"
+        },
+        {
+          "sourceRoot": "huggingface-cache",
+          "sourcePath": "models--nvidia--bigvgan_v2_22khz_80band_256x/snapshots/633ff708ed5b74903e86ff1298cf4a98e921c513/bigvgan_generator.pt",
+          "packagePath": "models/bigvgan/bigvgan_generator.pt",
+          "bytes": 449228171,
+          "sha256": "e95ba25972d3de0628d99cd156e9315a9c018899bf739988959ebe3544080ced"
+        }
+      ]
+    },
+    {
+      "name": "Whisper small encoder",
+      "repository": "openai/whisper-small",
+      "revision": "973afd24965f72e36ca33b3055d56a652f456b4d",
+      "huggingFaceLicense": "apache-2.0",
+      "sourceUrl": "https://huggingface.co/openai/whisper-small/tree/973afd24965f72e36ca33b3055d56a652f456b4d",
+      "derivation": "Exported as a float16 encoder with tools/export_whisper_encoder.py.",
+      "files": [
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "worker/whisper-small-encoder/config.json",
+          "packagePath": "models/whisper-small-encoder/config.json",
+          "bytes": 2448,
+          "sha256": "96f830f4a6952d26ae26e748f621019274fedae6e3503f6b7d102bbe7da710bb"
+        },
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "worker/whisper-small-encoder/encoder_metadata.json",
+          "packagePath": "models/whisper-small-encoder/encoder_metadata.json",
+          "bytes": 103,
+          "sha256": "945fac85ef3833ea7545dddce55eff671f55852bc87c46f942f6cd84b10a6343"
+        },
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "worker/whisper-small-encoder/encoder.safetensors",
+          "packagePath": "models/whisper-small-encoder/encoder.safetensors",
+          "bytes": 176326672,
+          "sha256": "b76b5e6d24318a2e0c67c31eb6a3bcab922643c546888999374b57b37faf3b71"
+        },
+        {
+          "sourceRoot": "project-checkpoints",
+          "sourcePath": "worker/whisper-small-encoder/preprocessor_config.json",
+          "packagePath": "models/whisper-small-encoder/preprocessor_config.json",
+          "bytes": 353,
+          "sha256": "86c752c0f26ae2cc92699a1805eb66366b01c9260b7d31c7bd142d6b9e56017a"
+        }
+      ]
+    }
+  ]
+}
